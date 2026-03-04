@@ -1,0 +1,24 @@
+# Dart/Flutter
+.dart_tool/
+.idea/
+*.iml
+
+# Build outputs
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Platform-specific folders (not needed for web)
+android/
+ios/
+linux/
+macos/
+windows/
+
+# Tests
+test/
+
+# Local files
+*.log
+.env
+credentials.json
