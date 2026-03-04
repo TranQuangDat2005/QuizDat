@@ -2,7 +2,7 @@
 
 Ứng dụng học từ vựng với Google Sheets làm database cá nhân.
 
-## ✨ Tính năng
+## Tính năng
 
 - 📚 Quản lý Repository & SetCard
 - 📝 Flashcards với learning states
@@ -11,12 +11,11 @@
 - ☁️ Sync với Google Sheets cá nhân
 - 🔐 Secure credential storage
 
-## 🚀 Cài đặt
+## Cài đặt
 
 ### Yêu cầu
 
 - Flutter SDK (3.0+)
-- Android Studio / Xcode
 - Google Cloud account (miễn phí)
 
 ### Chạy app
@@ -41,16 +40,13 @@ Xem hướng dẫn chi tiết trong app hoặc tài liệu `user_setup_guide.md`
 6. Nhập Sheet ID
 7. Hoàn tất!
 
-## 🏗️ Kiến trúc
+## Kiến trúc
 
 ```
 Flutter App → Google Sheets API → User's Personal Sheet
            ↓
       SQLite local (offline)
 ```
-
-**Không cần backend server!**
-
 ## 📱 Chạy trên thiết bị
 
 ### Android
