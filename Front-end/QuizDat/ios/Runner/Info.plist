@@ -45,5 +45,13 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Camera is used to scan QR codes to join battle rooms</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Local network access is used for P2P multiplayer battles</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_quizdat._tcp</string>
+	</array>
 </dict>
 </plist>
