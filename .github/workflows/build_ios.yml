@@ -3,13 +3,13 @@ name: Build iOS IPA
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch: # Cho phép bạn bấm chạy thủ công trên GitHub
+  workflow_dispatch:
 
 jobs:
   build-ios:
     name: Build iOS Unsigned IPA
-    runs-on: macos-latest # Sử dụng máy ảo Mac của GitHub
-    
+    runs-on: macos-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -26,13 +26,12 @@ jobs:
       - name: Build iOS App (No Codesign)
         working-directory: Front-end/QuizDat
         run: |
-          # Lệnh build bản cho iOS nhưng bỏ qua bước ký chứng chỉ (vì không có Apple Developer Account)
           flutter build ios --release --no-codesign
-          
-          # Đóng gói thư mục Runner.app thành file .ipa
+
+          # Package Runner.app into unsigned .ipa for LiveContainer
           cd build/ios/iphoneos
-          mkdir Payload
-          mv Runner.app Payload/
+          mkdir -p Payload
+          cp -r Runner.app Payload/
           zip -qq -r QuizDat.ipa Payload
 
       - name: Upload IPA Artifact
