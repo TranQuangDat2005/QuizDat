@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 class AppTheme {
   // --- LIGHT THEME ---
   static final lightTheme = ThemeData(
+    fontFamilyFallback: const ['Malgun Gothic', 'Roboto', 'Gulim'],
     brightness: Brightness.light,
     primaryColor: Colors.black, // Main brand color
     scaffoldBackgroundColor: Colors.white,
@@ -41,6 +42,7 @@ class AppTheme {
 
   // --- DARK THEME ---
   static final darkTheme = ThemeData(
+    fontFamilyFallback: const ['Malgun Gothic', 'Roboto', 'Gulim'],
     brightness: Brightness.dark,
     primaryColor: Colors.white, // Inverted for dark mode
     scaffoldBackgroundColor: const Color(0xFF121212), // Dark grey

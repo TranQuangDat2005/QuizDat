@@ -1,0 +1,41 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch: # Cho phép bạn bấm chạy thủ công trên GitHub
+
+jobs:
+  build-ios:
+    name: Build iOS Unsigned IPA
+    runs-on: macos-latest # Sử dụng máy ảo Mac của GitHub
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Install Dependencies
+        working-directory: Front-end/QuizDat
+        run: flutter pub get
+
+      - name: Build iOS App (No Codesign)
+        working-directory: Front-end/QuizDat
+        run: |
+          # Lệnh build bản cho iOS nhưng bỏ qua bước ký chứng chỉ (vì không có Apple Developer Account)
+          flutter build ios --release --no-codesign
+          
+          # Đóng gói thư mục Runner.app thành file .ipa
+          cd build/ios/iphoneos
+          mkdir Payload
+          mv Runner.app Payload/
+          zip -qq -r QuizDat.ipa Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: QuizDat-iOS-IPA
+          path: Front-end/QuizDat/build/ios/iphoneos/QuizDat.ipa
+          retention-days: 7

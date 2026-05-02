@@ -3,6 +3,7 @@ import 'package:file_picker/file_picker.dart';
 import 'dart:io';
 import '../services/config_manager.dart';
 import '../services/google_sheets_service.dart';
+import '../services/sm2_service.dart';
 import 'package:provider/provider.dart';
 import '../providers/theme_provider.dart';
 import '../widgets/app_sidebar.dart';
@@ -17,17 +18,27 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   final ConfigManager _config = ConfigManager();
   final GoogleSheetsService _sheets = GoogleSheetsService();
+  final SM2Service _sm2 = SM2Service();
   final TextEditingController _sheetIdController = TextEditingController();
 
   bool _isConfigured = false;
   bool _isTesting = false;
   String? _serviceAccountEmail;
   String? _credentialsFileName;
+  String? _storageMode;
+
+  // SM-2 limits
+  int _sm2NewLimit = 20;
+  int _sm2ReviewLimit = 200;
+  bool _sm2BuryRelated = true;
+
+  bool get _isLocalMode => _storageMode == ConfigManager.storageModeLocal;
 
   @override
   void initState() {
     super.initState();
     _loadCurrentConfig();
+    _loadSm2Limits();
   }
 
   @override
@@ -40,14 +51,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final configured = await _config.isConfigured();
     final sheetId = await _config.getSheetId();
     final email = await _config.getServiceAccountEmail();
+    final mode = await _config.getStorageMode();
 
     setState(() {
       _isConfigured = configured;
       _serviceAccountEmail = email;
+      _storageMode = mode;
       if (sheetId != null) {
         _sheetIdController.text = sheetId;
       }
     });
+  }
+
+  Future<void> _loadSm2Limits() async {
+    final limits = await _sm2.getLimits();
+    final bury = await _sm2.getBuryRelated();
+    if (!mounted) return;
+    setState(() {
+      _sm2NewLimit = limits.newLimit;
+      _sm2ReviewLimit = limits.reviewLimit;
+      _sm2BuryRelated = bury;
+    });
+  }
+
+  Future<void> _saveSm2Limits() async {
+    await _sm2.saveLimits(newLimit: _sm2NewLimit, reviewLimit: _sm2ReviewLimit);
+    await _sm2.setBuryRelated(_sm2BuryRelated);
   }
 
   Future<void> _pickCredentialsFile() async {
@@ -172,9 +201,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _isConfigured = false;
         _serviceAccountEmail = null;
         _credentialsFileName = null;
+        _storageMode = null;
       });
       if (!mounted) return;
-      _showSnackBar('Đã xóa cấu hình', Colors.orange);
+      Navigator.of(context).pushReplacementNamed('/setup');
+    }
+  }
+
+  Future<void> _changeStorageMode() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final theme = Theme.of(context);
+        return AlertDialog(
+          backgroundColor: theme.cardColor,
+          title: Text(
+            'Đổi phương thức lưu trữ',
+            style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          content: Text(
+            'Điều này sẽ xóa cấu hình hiện tại và đưa bạn về trang setup. Bạn có chắc không?',
+            style: theme.textTheme.bodyMedium,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text('Hủy', style: TextStyle(color: theme.textTheme.bodyMedium?.color)),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: theme.colorScheme.primary,
+                foregroundColor: theme.colorScheme.onPrimary,
+              ),
+              child: const Text('Tiếp tục'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm == true) {
+      await _config.clearConfiguration();
+      _sheets.dispose();
+      if (!mounted) return;
+      Navigator.of(context).pushReplacementNamed('/setup');
     }
   }
 
@@ -387,8 +458,131 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       },
                     );
                   },
+
                 ),
                 const SizedBox(height: 20),
+
+                // SM-2 Settings
+                Text(
+                  'Ôn tập Spaced Repetition (SM-2)',
+                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: theme.cardColor,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: theme.dividerColor),
+                  ),
+                  child: Column(
+                    children: [
+                      _buildNumberSettingRow(
+                        icon: Icons.fiber_new_rounded,
+                        color: Colors.blue,
+                        label: 'Từ mới tối đa / ngày',
+                        value: _sm2NewLimit,
+                        onChanged: (val) {
+                          setState(() => _sm2NewLimit = val);
+                          _saveSm2Limits();
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      _buildNumberSettingRow(
+                        icon: Icons.repeat_rounded,
+                        color: Colors.green,
+                        label: 'Từ ôn tập tối đa / ngày',
+                        value: _sm2ReviewLimit,
+                        onChanged: (val) {
+                          setState(() => _sm2ReviewLimit = val);
+                          _saveSm2Limits();
+                        },
+                      ),
+                      const Divider(height: 24),
+                      Row(
+                        children: [
+                          const Icon(Icons.hide_source_outlined, color: Colors.indigo, size: 24),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Cất thẻ liên quan (Bury)',
+                                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                                Text('Nếu bật, sau khi ôn Lật thẻ, thẻ Tự luận cùng từ sẽ bị dời sang ngày mai và ngược lại',
+                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                        color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                              ],
+                            ),
+                          ),
+                          Switch(
+                            value: _sm2BuryRelated,
+                            onChanged: (val) {
+                              setState(() => _sm2BuryRelated = val);
+                              _saveSm2Limits();
+                            },
+                            activeColor: Colors.indigo,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 32),
+
+                // Storage Mode Card
+                if (_storageMode != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: _isLocalMode
+                          ? Colors.green.withOpacity(isDark ? 0.12 : 0.07)
+                          : Colors.blue.withOpacity(isDark ? 0.12 : 0.07),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: _isLocalMode
+                            ? Colors.green.withOpacity(0.4)
+                            : Colors.blue.withOpacity(0.4),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          _isLocalMode ? Icons.computer_rounded : Icons.cloud_rounded,
+                          color: _isLocalMode ? Colors.green : Colors.blue,
+                          size: 28,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Phương thức lưu trữ',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                              Text(
+                                _isLocalMode
+                                    ? 'Lưu trên máy (SQLite)\nDữ liệu lưu offline trên thiết bị'
+                                    : 'Google Sheets (Cloud)\nDữ liệu đồng bộ qua đám mây',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: _changeStorageMode,
+                          child: const Text('Đổi'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                ],
 
                 // Status Card
                 Container(
@@ -439,6 +633,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
                 
+                // Google Sheets sections – ẩn khi Local mode
+                if (!_isLocalMode) ...[
                 const SizedBox(height: 32),
                 
                 // Credentials Upload
@@ -535,12 +731,54 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       minimumSize: const Size(double.infinity, 50),
                     ),
                   ),
+                ], // end if !_isLocalMode
                 ],
               ],
             ),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildNumberSettingRow({
+    required IconData icon,
+    required Color color,
+    required String label,
+    required int value,
+    required ValueChanged<int> onChanged,
+  }) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Icon(icon, color: color, size: 24),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(label, style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+        ),
+        Row(
+          children: [
+            IconButton(
+              onPressed: value > 0 ? () => onChanged(value - (value > 100 ? 10 : (value > 10 ? 5 : 1))) : null,
+              icon: Icon(Icons.remove_circle_outline, color: value > 0 ? theme.colorScheme.primary : theme.disabledColor),
+              visualDensity: VisualDensity.compact,
+            ),
+            SizedBox(
+              width: 36,
+              child: Text(
+                value.toString(),
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+            ),
+            IconButton(
+              onPressed: value < 999 ? () => onChanged(value + (value >= 100 ? 10 : (value >= 10 ? 5 : 1))) : null,
+              icon: Icon(Icons.add_circle_outline, color: value < 999 ? theme.colorScheme.primary : theme.disabledColor),
+              visualDensity: VisualDensity.compact,
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

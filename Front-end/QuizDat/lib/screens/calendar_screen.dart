@@ -350,10 +350,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     valueListenable: _selectedEvents,
                     builder: (context, value, _) {
                       if (value.isEmpty) {
-                        return const Center(
+                        return Center(
                           child: Text(
                             "Trống",
-                            style: TextStyle(color: Colors.black26),
+                            style: TextStyle(color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.3)),
                           ),
                         );
                       }

@@ -45,72 +45,77 @@ class _DashboardState extends State<Dashboard> {
   void _showSupportDialog() {
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: const BorderSide(color: Colors.black, width: 2),
-        ),
-        title: const Row(
-          children: [
-            Icon(Icons.contact_support_outlined, color: Colors.black),
-            SizedBox(width: 10),
-            Text("Hỗ trợ", style: TextStyle(fontWeight: FontWeight.bold)),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text("Mọi thắc mắc vui lòng liên hệ:"),
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey[300]!),
-              ),
-              child: Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      "datquangtran05@gmail.com",
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15,
+      builder: (ctx) {
+        final theme = Theme.of(context);
+        final isDark = theme.brightness == Brightness.dark;
+        
+        return AlertDialog(
+          backgroundColor: theme.cardColor,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: theme.dividerColor, width: 2),
+          ),
+          title: Row(
+            children: [
+              Icon(Icons.contact_support_outlined, color: theme.iconTheme.color),
+              const SizedBox(width: 10),
+              Text("Hỗ trợ", style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text("Mọi thắc mắc vui lòng liên hệ:", style: theme.textTheme.bodyMedium),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.grey[800] : Colors.grey[100],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: theme.dividerColor),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        "datquangtran05@gmail.com",
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                        ),
                       ),
                     ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.copy, color: Colors.blue),
-                    tooltip: "Sao chép Email",
-                    onPressed: () {
-                      Clipboard.setData(
-                        const ClipboardData(text: "datquangtran05@gmail.com"),
-                      );
-                      Navigator.pop(ctx);
-                      _showSnackBar("Đã sao chép Email!", Colors.green);
-                    },
-                  ),
-                ],
+                    IconButton(
+                      icon: const Icon(Icons.copy, color: Colors.blue),
+                      tooltip: "Sao chép Email",
+                      onPressed: () {
+                        Clipboard.setData(
+                          const ClipboardData(text: "datquangtran05@gmail.com"),
+                        );
+                        Navigator.pop(ctx);
+                        _showSnackBar("Đã sao chép Email!", Colors.green);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(
+                "Đóng",
+                style: TextStyle(
+                  color: theme.textTheme.bodyMedium?.color,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text(
-              "Đóng",
-              style: TextStyle(
-                color: Colors.black,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -180,10 +185,13 @@ class _DashboardState extends State<Dashboard> {
     showDialog(
       context: context,
       builder: (BuildContext dialogContext) {
+        final colorScheme = Theme.of(context).colorScheme;
+        final textTheme = Theme.of(context).textTheme;
+
         return Dialog(
-          backgroundColor: Colors.white,
+          backgroundColor: colorScheme.surface,
           shape: RoundedRectangleBorder(
-            side: const BorderSide(color: Colors.black, width: 2),
+            side: BorderSide(color: colorScheme.outline, width: 2),
             borderRadius: BorderRadius.circular(12),
           ),
           child: SingleChildScrollView(
@@ -191,45 +199,54 @@ class _DashboardState extends State<Dashboard> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(
+                Icon(
                   Icons.folder_shared_outlined,
                   size: 60,
-                  color: Colors.black,
+                  color: colorScheme.onSurface,
                 ),
                 const SizedBox(height: 16),
-                const Text(
+                Text(
                   "Tạo thư mục mới",
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 20,
+                  style: textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.w900,
-                    color: Colors.black,
+                    color: colorScheme.onSurface,
                   ),
                 ),
                 const SizedBox(height: 24),
                 TextField(
                   controller: nameController,
                   autofocus: true,
-                  cursorColor: Colors.black,
-                  decoration: const InputDecoration(
+                  cursorColor: colorScheme.primary,
+                  style: TextStyle(color: colorScheme.onSurface),
+                  decoration: InputDecoration(
                     labelText: "Tên thư mục",
-                    labelStyle: TextStyle(color: Colors.black54),
+                    labelStyle: TextStyle(color: colorScheme.onSurface.withOpacity(0.6)),
                     hintText: "Ví dụ: Từ vựng TOPIK...",
+                    hintStyle: TextStyle(color: colorScheme.onSurface.withOpacity(0.4)),
                     focusedBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: Colors.black, width: 2),
+                      borderSide: BorderSide(color: colorScheme.primary, width: 2),
+                    ),
+                    enabledBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: colorScheme.outline),
                     ),
                   ),
                 ),
                 const SizedBox(height: 16),
                 TextField(
                   controller: descController,
-                  cursorColor: Colors.black,
-                  decoration: const InputDecoration(
+                  cursorColor: colorScheme.primary,
+                  style: TextStyle(color: colorScheme.onSurface),
+                  decoration: InputDecoration(
                     labelText: "Mô tả",
-                    labelStyle: TextStyle(color: Colors.black54),
+                    labelStyle: TextStyle(color: colorScheme.onSurface.withOpacity(0.6)),
                     hintText: "Mô tả ngắn gọn về thư mục...",
+                    hintStyle: TextStyle(color: colorScheme.onSurface.withOpacity(0.4)),
                     focusedBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: Colors.black, width: 2),
+                      borderSide: BorderSide(color: colorScheme.primary, width: 2),
+                    ),
+                    enabledBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: colorScheme.outline),
                     ),
                   ),
                 ),
@@ -239,10 +256,10 @@ class _DashboardState extends State<Dashboard> {
                   children: [
                     TextButton(
                       onPressed: () => Navigator.pop(dialogContext),
-                      child: const Text(
+                      child: Text(
                         "Hủy",
                         style: TextStyle(
-                          color: Colors.black54,
+                          color: colorScheme.onSurface.withOpacity(0.6),
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -256,7 +273,7 @@ class _DashboardState extends State<Dashboard> {
                         Navigator.pop(dialogContext);
 
                         if (!mounted) return;
-                        _showSnackBar("Đang tạo thư mục...", Colors.black87);
+                        _showSnackBar("Đang tạo thư mục...", colorScheme.primary);
 
                         try {
                           await RepositoryService().createRepository(
@@ -273,8 +290,8 @@ class _DashboardState extends State<Dashboard> {
                         }
                       },
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.black,
-                        foregroundColor: Colors.white,
+                        backgroundColor: colorScheme.primary,
+                        foregroundColor: colorScheme.onPrimary,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 32,
                           vertical: 12,
@@ -432,7 +449,7 @@ class _DashboardState extends State<Dashboard> {
                                   Navigator.pop(dialogContext);
 
                                   if (!mounted) return;
-                                  _showSnackBar("Đang tạo học phần...", Colors.black87);
+                                  _showSnackBar("Đang tạo học phần...", colorScheme.primary);
 
                                   try {
                                     await SetService().createSetCard(name, selectedFolderId!);
@@ -824,12 +841,12 @@ class _DashboardState extends State<Dashboard> {
         ),
         drawer: const AppSidebar(currentRoute: '/dashboard'),
         body: _isLoading
-            ? const Center(
-                child: CircularProgressIndicator(color: Colors.black),
+            ? Center(
+                child: CircularProgressIndicator(color: theme.colorScheme.primary),
               )
             : RefreshIndicator(
                 onRefresh: _loadData,
-                color: Colors.black,
+                color: theme.colorScheme.primary,
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 16.0,

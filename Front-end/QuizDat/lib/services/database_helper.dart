@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 
@@ -16,13 +17,30 @@ class DatabaseHelper {
   }
 
   Future<Database> _initDatabase() async {
-    final dbPath = await getDatabasesPath();
-    final path = join(dbPath, 'quizdat.db');
+    String dbPath;
+
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      // On desktop, use a user-writable directory so the app works
+      // correctly when installed in Program Files (which is read-only).
+      final appData = Platform.isWindows
+          ? (Platform.environment['APPDATA'] ?? Platform.environment['USERPROFILE'] ?? '.')
+          : (Platform.environment['HOME'] ?? '.');
+      final dir = Directory(join(appData, 'QuizDat'));
+      if (!await dir.exists()) await dir.create(recursive: true);
+      dbPath = join(dir.path, 'quizdat.db');
+    } else {
+      dbPath = join(await getDatabasesPath(), 'quizdat.db');
+    }
 
     return await openDatabase(
-      path,
-      version: 1,
+      dbPath,
+      version: 5,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
+      onOpen: (db) async {
+        // Enable foreign key support so ON DELETE CASCADE works
+        await db.execute('PRAGMA foreign_keys = ON');
+      },
     );
   }
 
@@ -95,6 +113,287 @@ class DatabaseHelper {
         created_at INTEGER DEFAULT (strftime('%s', 'now'))
       )
     ''');
+
+    // SM2Progress Table (version 4: composite PK (card_id, card_type), buried_until)
+    await db.execute('''
+      CREATE TABLE SM2Progress (
+        card_id       TEXT    NOT NULL,
+        card_type     TEXT    NOT NULL DEFAULT 'flip',
+        repetitions   INTEGER DEFAULT 0,
+        ease_factor   REAL    DEFAULT 2.5,
+        interval_days INTEGER DEFAULT 1,
+        next_review   TEXT    DEFAULT NULL,
+        buried_until  TEXT    DEFAULT NULL,
+        PRIMARY KEY (card_id, card_type)
+      )
+    ''');
+
+    // SM2DailyLog Table
+    await db.execute('''
+      CREATE TABLE SM2DailyLog (
+        date           TEXT PRIMARY KEY,
+        new_studied    INTEGER DEFAULT 0,
+        review_studied INTEGER DEFAULT 0
+      )
+    ''');
+
+    // SM2Settings Table
+    await db.execute('''
+      CREATE TABLE SM2Settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT
+      )
+    ''');
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS SM2Progress (
+          card_id       TEXT PRIMARY KEY,
+          repetitions   INTEGER DEFAULT 0,
+          ease_factor   REAL    DEFAULT 2.5,
+          interval_days INTEGER DEFAULT 1,
+          next_review   TEXT    DEFAULT NULL
+        )
+      ''');
+    }
+    if (oldVersion < 3) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS SM2DailyLog (
+          date           TEXT PRIMARY KEY,
+          new_studied    INTEGER DEFAULT 0,
+          review_studied INTEGER DEFAULT 0
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS SM2Settings (
+          key   TEXT PRIMARY KEY,
+          value TEXT
+        )
+      ''');
+    }
+    if (oldVersion < 4) {
+      // Migrate SM2Progress: rename, add card_type + buried_until, copy old data as 'flip'
+      await db.execute('ALTER TABLE SM2Progress RENAME TO SM2Progress_old');
+      await db.execute('''
+        CREATE TABLE SM2Progress (
+          card_id       TEXT    NOT NULL,
+          card_type     TEXT    NOT NULL DEFAULT 'flip',
+          repetitions   INTEGER DEFAULT 0,
+          ease_factor   REAL    DEFAULT 2.5,
+          interval_days INTEGER DEFAULT 1,
+          next_review   TEXT    DEFAULT NULL,
+          buried_until  TEXT    DEFAULT NULL,
+          PRIMARY KEY (card_id, card_type)
+        )
+      ''');
+      await db.execute('''
+        INSERT INTO SM2Progress (card_id, card_type, repetitions, ease_factor, interval_days, next_review)
+        SELECT card_id, 'flip', repetitions, ease_factor, interval_days, next_review
+        FROM SM2Progress_old
+      ''');
+      await db.execute('DROP TABLE SM2Progress_old');
+    }
+    if (oldVersion < 5) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS Repository (
+          repository_id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          description TEXT,
+          last_modified INTEGER DEFAULT (strftime('%s', 'now')),
+          is_synced INTEGER DEFAULT 1,
+          deleted_at INTEGER DEFAULT NULL
+        )
+      ''');
+
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS SetCard (
+          set_id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          repository_id TEXT NOT NULL,
+          last_learned_time TEXT,
+          last_modified INTEGER DEFAULT (strftime('%s', 'now')),
+          is_synced INTEGER DEFAULT 1,
+          deleted_at INTEGER DEFAULT NULL,
+          FOREIGN KEY (repository_id) REFERENCES Repository(repository_id) ON DELETE CASCADE
+        )
+      ''');
+
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS Card (
+          card_id TEXT PRIMARY KEY,
+          term TEXT NOT NULL,
+          definition TEXT NOT NULL,
+          state TEXT DEFAULT 'new',
+          set_id TEXT NOT NULL,
+          last_modified INTEGER DEFAULT (strftime('%s', 'now')),
+          is_synced INTEGER DEFAULT 1,
+          deleted_at INTEGER DEFAULT NULL,
+          FOREIGN KEY (set_id) REFERENCES SetCard(set_id) ON DELETE CASCADE
+        )
+      ''');
+
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS Calendar (
+          calendar_id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          description TEXT,
+          date TEXT NOT NULL,
+          type TEXT DEFAULT 'event',
+          is_done INTEGER DEFAULT 0,
+          created_at TEXT,
+          last_modified INTEGER DEFAULT (strftime('%s', 'now')),
+          is_synced INTEGER DEFAULT 1,
+          deleted_at INTEGER DEFAULT NULL
+        )
+      ''');
+
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS SyncQueue (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          table_name TEXT NOT NULL,
+          record_id TEXT NOT NULL,
+          operation TEXT NOT NULL,
+          data TEXT,
+          created_at INTEGER DEFAULT (strftime('%s', 'now'))
+        )
+      ''');
+    }
+  }
+
+  // ==========================================
+  // SM2 SETTINGS OPERATIONS
+  // ==========================================
+
+  Future<int> getSm2NewLimit() async {
+    final db = await database;
+    final results = await db.query('SM2Settings', where: 'key = ?', whereArgs: ['new_limit']);
+    if (results.isEmpty) return 20; // default
+    return int.tryParse(results.first['value'] as String? ?? '20') ?? 20;
+  }
+
+  Future<int> getSm2ReviewLimit() async {
+    final db = await database;
+    final results = await db.query('SM2Settings', where: 'key = ?', whereArgs: ['review_limit']);
+    if (results.isEmpty) return 200; // default
+    return int.tryParse(results.first['value'] as String? ?? '200') ?? 200;
+  }
+
+  Future<void> setSm2NewLimit(int limit) async {
+    final db = await database;
+    await db.insert('SM2Settings', {'key': 'new_limit', 'value': limit.toString()},
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<void> setSm2ReviewLimit(int limit) async {
+    final db = await database;
+    await db.insert('SM2Settings', {'key': 'review_limit', 'value': limit.toString()},
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<bool> getSm2BuryRelated() async {
+    final db = await database;
+    final results = await db.query('SM2Settings', where: 'key = ?', whereArgs: ['bury_related']);
+    if (results.isEmpty) return true; // default: bury on
+    return (results.first['value'] as String? ?? '1') == '1';
+  }
+
+  Future<void> setSm2BuryRelated(bool value) async {
+    final db = await database;
+    await db.insert('SM2Settings', {'key': 'bury_related', 'value': value ? '1' : '0'},
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  // ==========================================
+  // SM2 DAILY LOG OPERATIONS
+  // ==========================================
+
+  Future<Map<String, int>> getSm2DailyLog(String date) async {
+    final db = await database;
+    final results = await db.query('SM2DailyLog', where: 'date = ?', whereArgs: [date]);
+    if (results.isEmpty) return {'new_studied': 0, 'review_studied': 0};
+    return {
+      'new_studied': results.first['new_studied'] as int? ?? 0,
+      'review_studied': results.first['review_studied'] as int? ?? 0,
+    };
+  }
+
+  Future<void> incrementSm2DailyNew(String date) async {
+    final db = await database;
+    await db.rawInsert('''
+      INSERT INTO SM2DailyLog (date, new_studied, review_studied)
+      VALUES (?, 1, 0)
+      ON CONFLICT(date) DO UPDATE SET new_studied = new_studied + 1
+    ''', [date]);
+  }
+
+  Future<void> incrementSm2DailyReview(String date) async {
+    final db = await database;
+    await db.rawInsert('''
+      INSERT INTO SM2DailyLog (date, new_studied, review_studied)
+      VALUES (?, 0, 1)
+      ON CONFLICT(date) DO UPDATE SET review_studied = review_studied + 1
+    ''', [date]);
+  }
+
+  // ==========================================
+  // SM2 PROGRESS OPERATIONS
+  // ==========================================
+
+  Future<Map<String, dynamic>?> getSm2Progress(String cardId) async {
+    final db = await database;
+    final results = await db.query(
+      'SM2Progress',
+      where: 'card_id = ? AND card_type = ?',
+      whereArgs: [cardId, 'flip'],
+    );
+    return results.isNotEmpty ? results.first : null;
+  }
+
+  // Lay progress theo card_type cu the
+  Future<Map<String, dynamic>?> getSm2ProgressTyped(String cardId, String cardType) async {
+    final db = await database;
+    final results = await db.query(
+      'SM2Progress',
+      where: 'card_id = ? AND card_type = ?',
+      whereArgs: [cardId, cardType],
+    );
+    return results.isNotEmpty ? results.first : null;
+  }
+
+  Future<void> upsertSm2Progress(Map<String, dynamic> data) async {
+    final db = await database;
+    // Ensure card_type is present
+    if (!data.containsKey('card_type')) data['card_type'] = 'flip';
+    await db.insert(
+      'SM2Progress',
+      data,
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  // Bury the sibling card (opposite type) until tomorrow
+  Future<void> buryRelatedCard(String cardId, String reviewedCardType) async {
+    final db = await database;
+    final siblingType = reviewedCardType == 'flip' ? 'typing' : 'flip';
+    final tomorrow = DateTime.now().add(const Duration(days: 1)).toIso8601String().substring(0, 10);
+    await db.rawInsert('''
+      INSERT INTO SM2Progress (card_id, card_type, buried_until)
+      VALUES (?, ?, ?)
+      ON CONFLICT(card_id, card_type) DO UPDATE SET buried_until = ?
+    ''', [cardId, siblingType, tomorrow, tomorrow]);
+  }
+
+  /// Xoa toan bo SM2 progress cua mot set (reset)
+  Future<void> clearSm2ProgressForSet(String setId) async {
+    final db = await database;
+    await db.rawDelete('''
+      DELETE FROM SM2Progress
+      WHERE card_id IN (
+        SELECT card_id FROM Card WHERE set_id = ? AND deleted_at IS NULL
+      )
+    ''', [setId]);
   }
 
   // ==========================================
@@ -138,12 +437,9 @@ class DatabaseHelper {
 
   Future<void> deleteRepository(String id) async {
     final db = await database;
-    await db.update(
+    // Hard delete: ON DELETE CASCADE sẽ tự động xóa toàn bộ SetCard và Card bên trong
+    await db.delete(
       'Repository',
-      {
-        'deleted_at': DateTime.now().millisecondsSinceEpoch ~/ 1000,
-        'is_synced': 0,
-      },
       where: 'repository_id = ?',
       whereArgs: [id],
     );
@@ -201,12 +497,9 @@ class DatabaseHelper {
 
   Future<void> deleteSetCard(String id) async {
     final db = await database;
-    await db.update(
+    // Hard delete: ON DELETE CASCADE sẽ tự động xóa toàn bộ Card bên trong
+    await db.delete(
       'SetCard',
-      {
-        'deleted_at': DateTime.now().millisecondsSinceEpoch ~/ 1000,
-        'is_synced': 0,
-      },
       where: 'set_id = ?',
       whereArgs: [id],
     );
@@ -222,7 +515,7 @@ class DatabaseHelper {
       'Card',
       where: 'set_id = ? AND deleted_at IS NULL',
       whereArgs: [setId],
-      orderBy: 'last_modified DESC',
+      orderBy: 'card_id ASC',
     );
   }
 

@@ -1,7 +1,7 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:convert';
 
-/// Manages user-provided Google Sheets configuration
+/// Manages user-provided configuration (storage mode, Google Sheets credentials)
 class ConfigManager {
   static final ConfigManager _instance = ConfigManager._internal();
   factory ConfigManager() => _instance;
@@ -13,6 +13,11 @@ class ConfigManager {
   static const _keyCredentials = 'google_credentials';
   static const _keySheetId = 'google_sheet_id';
   static const _keyConfigured = 'is_configured';
+  static const _keyStorageMode = 'storage_mode';
+
+  // Storage mode values
+  static const storageModeGoogleSheets = 'google_sheets';
+  static const storageModeLocal = 'local';
 
   /// Check if user has configured their credentials
   Future<bool> isConfigured() async {
@@ -78,6 +83,22 @@ class ConfigManager {
   bool validateSheetId(String sheetId) {
     // Google Sheet IDs are typically 44 characters
     return sheetId.trim().isNotEmpty && sheetId.length > 20;
+  }
+
+  /// Save storage mode preference
+  Future<void> saveStorageMode(String mode) async {
+    await _storage.write(key: _keyStorageMode, value: mode);
+  }
+
+  /// Get storage mode preference (null if not set yet)
+  Future<String?> getStorageMode() async {
+    return await _storage.read(key: _keyStorageMode);
+  }
+
+  /// Returns true if user chose local SQLite storage
+  Future<bool> isLocalMode() async {
+    final mode = await getStorageMode();
+    return mode == storageModeLocal;
   }
 
   /// Get service account email from credentials

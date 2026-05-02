@@ -334,7 +334,7 @@ class _SetCardManagementState extends State<SetCardManagement> {
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Colors.black))
+          ? Center(child: CircularProgressIndicator(color: Theme.of(context).colorScheme.primary))
           : Column(
               children: [
                 _buildControlBar(),
