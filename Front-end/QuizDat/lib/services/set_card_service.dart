@@ -5,6 +5,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import '../models/set_card.dart';
 import 'database_helper.dart';
 import 'google_sheets_setcard_adapter.dart';
+import 'google_sheets_card_adapter.dart';
 import 'config_manager.dart';
 import '../constants/app_constants.dart';
 
@@ -264,15 +265,19 @@ class SetService {
 
   /// Delete set card (Offline-First)
   Future<bool> deleteSetCard(String setId) async {
-    // Soft delete in local database
+    // 1. Local delete (Hard delete via DatabaseHelper which cascades to cards locally)
     await _dbHelper.deleteSetCard(setId);
 
-    // Try to sync with Sheets if online
+    // 2. Try to sync with Sheets if online
     if (await _hasConnection()) {
       try {
+        // Cascade delete in Sheets: Cards -> SetCard
+        final GoogleSheetsCardAdapter cardAdapter = GoogleSheetsCardAdapter();
+        await cardAdapter.deleteCardsBySetIds([setId]);
+        
         final result = await _sheetsAdapter.deleteSetCard(setId);
         if (result) {
-          print('✅ SetCard deleted from Sheets');
+          print('✅ SetCard and its cards deleted from Sheets');
           return true;
         }
       } catch (e) {

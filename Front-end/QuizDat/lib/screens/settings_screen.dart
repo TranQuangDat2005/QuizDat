@@ -7,6 +7,7 @@ import '../services/sm2_service.dart';
 import 'package:provider/provider.dart';
 import '../providers/theme_provider.dart';
 import '../widgets/app_sidebar.dart';
+import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -437,28 +438,110 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Theme Toggle
+                // Theme Style Selector & Text Scale
                 Consumer<ThemeProvider>(
                   builder: (context, themeProvider, child) {
-                    return SwitchListTile(
-                      title: const Text(
-                        'Chế độ tối (Dark Mode)',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      secondary: Icon(
-                        themeProvider.isDarkMode
-                            ? Icons.dark_mode
-                            : Icons.light_mode,
-                      ),
-                      value: themeProvider.isDarkMode,
-                      activeColor: Colors.white,
-                      activeTrackColor: Colors.grey,
-                      onChanged: (value) {
-                        themeProvider.toggleTheme(value);
-                      },
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // 3-way theme selector
+                        Text(
+                          'Giao diện',
+                          style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: SegmentedButton<String>(
+                            segments: const [
+                              ButtonSegment(
+                                value: 'light',
+                                label: Text('Sáng'),
+                              ),
+                              ButtonSegment(
+                                value: 'dark',
+                                label: Text('Tối'),
+                              ),
+                              ButtonSegment(
+                                value: 'custom',
+                                label: Text('Tùy chỉnh'),
+                              ),
+                            ],
+                            selected: {themeProvider.themeStyle},
+                            onSelectionChanged: (Set<String> selected) {
+                              themeProvider.setThemeStyle(selected.first);
+                            },
+                            style: ButtonStyle(
+                              visualDensity: VisualDensity.comfortable,
+                            ),
+                          ),
+                        ),
+
+                        // Custom color pickers (only shown in custom mode)
+                        if (themeProvider.isCustomMode) ...[
+                          const SizedBox(height: 20),
+                          Text(
+                            'Tùy chỉnh màu sắc',
+                            style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 12),
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: theme.cardColor,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: theme.dividerColor),
+                            ),
+                            child: Column(
+                              children: [
+                                _buildColorRow('Màu chính (Primary)', 'primary', themeProvider.customPrimary, themeProvider),
+                                const SizedBox(height: 12),
+                                _buildColorRow('Màu nền (Background)', 'background', themeProvider.customBackground, themeProvider),
+                                const SizedBox(height: 12),
+                                _buildColorRow('Màu chữ (Text)', 'text', themeProvider.customText, themeProvider),
+                                const SizedBox(height: 12),
+                                _buildColorRow('Màu thẻ (Card)', 'card', themeProvider.customCard, themeProvider),
+                                const SizedBox(height: 12),
+                                _buildColorRow('Màu nhấn (Accent)', 'accent', themeProvider.customAccent, themeProvider),
+                              ],
+                            ),
+                          ),
+                        ],
+
+                        // Text scale slider
+                        const SizedBox(height: 20),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(Icons.text_fields, color: theme.iconTheme.color),
+                                  const SizedBox(width: 16),
+                                  Text(
+                                    'Kích thước chữ: ${(themeProvider.textScaleFactor * 100).toInt()}%',
+                                    style: const TextStyle(fontWeight: FontWeight.bold),
+                                  ),
+                                ],
+                              ),
+                              Slider(
+                                value: themeProvider.textScaleFactor,
+                                min: 0.8,
+                                max: 2.0,
+                                divisions: 24,
+                                label: '${(themeProvider.textScaleFactor * 100).toInt()}%',
+                                activeColor: theme.colorScheme.primary,
+                                onChanged: (value) {
+                                  themeProvider.setTextScaleFactor(value);
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     );
                   },
-
                 ),
                 const SizedBox(height: 20),
 
@@ -779,6 +862,83 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         ),
       ],
+    );
+  }
+
+  Widget _buildColorRow(String label, String colorKey, Color currentColor, ThemeProvider themeProvider) {
+    return InkWell(
+      onTap: () => _openColorPicker(label, colorKey, currentColor, themeProvider),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: currentColor,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: Theme.of(context).dividerColor,
+                  width: 2,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: currentColor.withOpacity(0.3),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Text(
+                label,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+              ),
+            ),
+            Icon(Icons.edit, size: 18, color: Theme.of(context).iconTheme.color?.withOpacity(0.5)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _openColorPicker(String label, String colorKey, Color currentColor, ThemeProvider themeProvider) {
+    Color pickedColor = currentColor;
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: Text('Chọn $label'),
+          content: SingleChildScrollView(
+            child: ColorPicker(
+              pickerColor: currentColor,
+              onColorChanged: (color) {
+                pickedColor = color;
+              },
+              enableAlpha: false,
+              labelTypes: const [],
+              pickerAreaHeightPercent: 0.7,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Hủy'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                themeProvider.setCustomColor(colorKey, pickedColor);
+                Navigator.pop(ctx);
+              },
+              child: const Text('Áp dụng'),
+            ),
+          ],
+        );
+      },
     );
   }
 }

@@ -32,9 +32,21 @@ class MyApp extends StatelessWidget {
           return MaterialApp(
             title: 'QuizDat',
             debugShowCheckedModeBanner: false,
-            themeMode: themeProvider.themeMode,
-            theme: AppTheme.lightTheme,
+            themeMode: themeProvider.isCustomMode
+                ? ThemeMode.light  // Force light mode to use custom theme
+                : themeProvider.themeMode,
+            theme: themeProvider.isCustomMode
+                ? themeProvider.customTheme
+                : AppTheme.lightTheme,
             darkTheme: AppTheme.darkTheme,
+            builder: (context, child) {
+              return MediaQuery(
+                data: MediaQuery.of(context).copyWith(
+                  textScaler: TextScaler.linear(themeProvider.textScaleFactor),
+                ),
+                child: child!,
+              );
+            },
             home: const AppInitializer(),
             routes: {
               '/dashboard': (context) => const Dashboard(),

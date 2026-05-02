@@ -213,4 +213,25 @@ class GoogleSheetsSetCardAdapter {
       rethrow;
     }
   }
+
+  /// Delete multiple set cards by their Repository IDs (useful for cascading deletes)
+  Future<void> deleteSetCardsByRepoIds(List<String> repoIds) async {
+    if (repoIds.isEmpty) return;
+    try {
+      final rows = await _sheets.getSheetValues(_sheetName);
+      List<int> rowsToDelete = [];
+      
+      // Assuming repository_id is at column index 2
+      for (int i = 1; i < rows.length; i++) {
+        if (rows[i].length > 2 && repoIds.contains(rows[i][2].toString())) {
+          rowsToDelete.add(i);
+        }
+      }
+
+      await _sheets.deleteRows(_sheetName, rowsToDelete);
+    } catch (e) {
+      print('❌ Error deleting set cards by repo IDs from Sheets: $e');
+      rethrow;
+    }
+  }
 }

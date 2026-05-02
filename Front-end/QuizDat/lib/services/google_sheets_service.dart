@@ -226,6 +226,46 @@ class GoogleSheetsService {
     }
   }
 
+  /// Delete multiple rows by row indices
+  Future<void> deleteRows(String sheetName, List<int> rowIndices) async {
+    if (rowIndices.isEmpty) return;
+    if (!isReady) await initialize();
+    if (!isReady) throw Exception('Google Sheets API not initialized');
+
+    try {
+      final spreadsheet = await _sheetsApi!.spreadsheets.get(_currentSheetId!);
+      final sheet = spreadsheet.sheets?.firstWhere(
+        (s) => s.properties?.title == sheetName,
+      );
+      
+      if (sheet == null) throw Exception('Sheet $sheetName not found');
+
+      // Sort descending to avoid index shifting when deleting
+      final sortedIndices = List<int>.from(rowIndices)..sort((a, b) => b.compareTo(a));
+
+      final requests = sortedIndices.map((rowIndex) {
+        return sheets.Request()
+          ..deleteDimension = (sheets.DeleteDimensionRequest()
+            ..range = (sheets.DimensionRange()
+              ..sheetId = sheet.properties!.sheetId
+              ..dimension = 'ROWS'
+              ..startIndex = rowIndex
+              ..endIndex = rowIndex + 1));
+      }).toList();
+
+      final batchRequest = sheets.BatchUpdateSpreadsheetRequest()
+        ..requests = requests;
+
+      await _sheetsApi!.spreadsheets.batchUpdate(
+        batchRequest,
+        _currentSheetId!,
+      );
+    } catch (e) {
+      print('❌ Error deleting rows from $sheetName: $e');
+      rethrow;
+    }
+  }
+
   /// Execute a batch update request
   Future<void> batchUpdate(List<sheets.Request> requests) async {
     if (!isReady) await initialize();

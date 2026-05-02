@@ -1,0 +1,41 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: # Cho phép bạn bấm chạy thủ công trên GitHub
+
+jobs:
+  build-windows:
+    name: Build Windows App & Installer
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Install Dependencies
+        working-directory: Front-end/QuizDat
+        run: flutter pub get
+
+      - name: Build Windows App
+        working-directory: Front-end/QuizDat
+        run: flutter build windows --release
+
+      - name: Create Installer with Inno Setup
+        working-directory: Front-end/QuizDat
+        run: |
+          # The standard path for Inno Setup compiler on GitHub Actions windows-latest
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" quizdat_installer.iss
+
+      - name: Upload Windows Setup Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: QuizDat-Windows-Setup
+          path: Front-end/QuizDat/build/installer/QuizDat_Installer.exe
+          retention-days: 7

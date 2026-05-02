@@ -242,4 +242,25 @@ class GoogleSheetsCardAdapter {
       rethrow;
     }
   }
+
+  /// Delete multiple cards by their Set IDs (useful for cascading deletes)
+  Future<void> deleteCardsBySetIds(List<String> setIds) async {
+    if (setIds.isEmpty) return;
+    try {
+      final rows = await _sheets.getSheetValues(_sheetName);
+      List<int> rowsToDelete = [];
+      
+      // Assuming set_id is at column index 4
+      for (int i = 1; i < rows.length; i++) {
+        if (rows[i].length > 4 && setIds.contains(rows[i][4].toString())) {
+          rowsToDelete.add(i);
+        }
+      }
+
+      await _sheets.deleteRows(_sheetName, rowsToDelete);
+    } catch (e) {
+      print('❌ Error deleting cards by set IDs from Sheets: $e');
+      rethrow;
+    }
+  }
 }

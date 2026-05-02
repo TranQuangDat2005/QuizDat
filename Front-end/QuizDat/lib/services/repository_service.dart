@@ -3,12 +3,16 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import '../models/repository.dart';
 import 'database_helper.dart';
 import 'google_sheets_repository_adapter.dart';
+import 'google_sheets_setcard_adapter.dart';
+import 'google_sheets_card_adapter.dart';
 import 'config_manager.dart';
 
 class RepositoryService {
   final DatabaseHelper _dbHelper = DatabaseHelper();
   final Connectivity _connectivity = Connectivity();
   final GoogleSheetsRepositoryAdapter _sheetsAdapter = GoogleSheetsRepositoryAdapter();
+  final GoogleSheetsSetCardAdapter _setCardAdapter = GoogleSheetsSetCardAdapter();
+  final GoogleSheetsCardAdapter _cardAdapter = GoogleSheetsCardAdapter();
   final ConfigManager _config = ConfigManager();
 
   Future<bool> _hasConnection() async {
@@ -152,14 +156,23 @@ class RepositoryService {
 
   /// Delete repository (Offline-First with Google Sheets)
   Future<bool> deleteRepository(String id) async {
-    // Soft delete in local database
+    // 1. Fetch children BEFORE local hard delete so we know what needs to be deleted remotely
+    final sets = await _dbHelper.getSetCardsByRepositoryId(id);
+    final setIds = sets.map((s) => s['set_id'].toString()).toList();
+
+    // 2. Hard delete in local database (this automatically cascades to local SetCards and Cards!)
     await _dbHelper.deleteRepository(id);
 
-    // Try to sync with Google Sheets if configured and online
+    // 3. Try to sync with Google Sheets if configured and online
     if (await _config.isConfigured() && await _hasConnection()) {
       try {
+        // Cascade delete in Sheets: Cards -> SetCards -> Repository
+        if (setIds.isNotEmpty) {
+           await _cardAdapter.deleteCardsBySetIds(setIds);
+           await _setCardAdapter.deleteSetCardsByRepoIds([id]);
+        }
         await _sheetsAdapter.deleteRepository(id);
-        print('✅ Repository deleted from Google Sheets');
+        print('✅ Repository and its children deleted from Google Sheets');
         return true;
       } catch (e) {
         print('⚠️  Delete sync failed, queued for later: $e');
@@ -168,6 +181,17 @@ class RepositoryService {
           recordId: id,
           operation: 'DELETE',
         );
+        // Note: in a fully offline-first app, we'd also queue deletes for the children.
+        // But since we can't easily queue "bulk delete by set ID", we rely on the parent queue.
+        // SyncService would need to be updated to handle cascading deletes if offline,
+        // or we just accept that if they delete offline, it might orphan children on sheets.
+        // For now, doing it inline when online is a huge improvement.
+        if (setIds.isNotEmpty) {
+           for (var setId in setIds) {
+             await _dbHelper.addToSyncQueue(tableName: 'SetCard', recordId: setId, operation: 'DELETE');
+             // Optionally queue cards, but that might be hundreds of items.
+           }
+        }
       }
     } else {
       await _dbHelper.addToSyncQueue(
@@ -175,6 +199,11 @@ class RepositoryService {
         recordId: id,
         operation: 'DELETE',
       );
+      if (setIds.isNotEmpty) {
+         for (var setId in setIds) {
+           await _dbHelper.addToSyncQueue(tableName: 'SetCard', recordId: setId, operation: 'DELETE');
+         }
+      }
     }
 
     return true;
