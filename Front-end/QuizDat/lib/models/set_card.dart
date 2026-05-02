@@ -54,4 +54,14 @@ class SetCard {
 
     return "$day/$month/$year";
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'set_id': setId,
+      'name': name,
+      'repository_id': repositoryId,
+      'last_learned_time': lastLearnedTime?.toIso8601String(),
+      'status': status,
+    };
+  }
 }

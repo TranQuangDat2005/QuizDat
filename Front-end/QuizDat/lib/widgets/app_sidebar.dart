@@ -4,6 +4,7 @@ import '../screens/dashboard.dart';
 import '../screens/folder_management.dart';
 import '../screens/calendar_screen.dart';
 import '../screens/settings_screen.dart';
+import '../screens/battle_lobby_screen.dart';
 
 class AppSidebar extends StatelessWidget {
   final String currentRoute;
@@ -159,6 +160,14 @@ class AppSidebar extends StatelessWidget {
                   selectedColor: theme.primaryColor,
                   selectedTileColor: isDark ? Colors.white12 : Colors.grey[200],
                   onTap: () => _navigateTo(context, '/calendar', const CalendarScreen()),
+                ),
+                ListTile(
+                  leading: Icon(Icons.sports_esports, color: theme.iconTheme.color),
+                  title: Text('Đấu trường P2P', style: theme.textTheme.bodyLarge),
+                  selected: currentRoute == '/battle',
+                  selectedColor: theme.primaryColor,
+                  selectedTileColor: isDark ? Colors.white12 : Colors.grey[200],
+                  onTap: () => _navigateTo(context, '/battle', const BattleLobbyScreen()),
                 ),
               ],
             ),

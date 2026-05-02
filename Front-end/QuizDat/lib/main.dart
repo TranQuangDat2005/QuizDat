@@ -5,6 +5,7 @@ import 'services/config_manager.dart';
 import 'package:provider/provider.dart';
 import 'theme/app_theme.dart';
 import 'providers/theme_provider.dart';
+import 'providers/battle_provider.dart';
 
 import 'dart:io';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -26,6 +27,7 @@ class MyApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        ChangeNotifierProvider(create: (_) => BattleProvider()),
       ],
       child: Consumer<ThemeProvider>(
         builder: (context, themeProvider, child) {

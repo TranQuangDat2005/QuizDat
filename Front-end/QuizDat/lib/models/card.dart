@@ -23,4 +23,14 @@ class VocabCard {
       setId: json['set_id']?.toString() ?? '',
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'card_id': cardId,
+      'term': term,
+      'definition': definition,
+      'state': state,
+      'set_id': setId,
+    };
+  }
 }
