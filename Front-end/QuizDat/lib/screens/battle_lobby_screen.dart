@@ -4,7 +4,6 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../providers/battle_provider.dart';
 import '../widgets/app_sidebar.dart';
-import '../models/battle_models.dart';
 import '../models/card.dart';
 import '../models/set_card.dart';
 import '../services/database_helper.dart';
@@ -20,10 +19,15 @@ class BattleLobbyScreen extends StatefulWidget {
 class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
   bool _isScanning = false;
   final TextEditingController _ipController = TextEditingController();
+  final TextEditingController _nameController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final provider = context.read<BattleProvider>();
+      _nameController.text = provider.myName;
+    });
   }
 
   void _createRoom() async {
@@ -143,7 +147,30 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
               'Chọn vai trò của bạn',
               style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
             ),
-            const SizedBox(height: 40),
+            const SizedBox(height: 20),
+
+            // ── Player name input ──
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _nameController,
+                    decoration: InputDecoration(
+                      labelText: 'Tên hiển thị của bạn',
+                      prefixIcon: const Icon(Icons.person),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    onChanged: (val) {
+                      context.read<BattleProvider>().setPlayerName(val);
+                    },
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 24),
             SizedBox(
               width: double.infinity,
               height: 60,
@@ -264,6 +291,30 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
               textAlign: TextAlign.center,
             ),
           ),
+
+        // Name edit bar
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          color: theme.cardColor,
+          child: Row(
+            children: [
+              const Icon(Icons.person, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Bạn: ${provider.myName}',
+                  style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.edit, size: 18),
+                tooltip: 'Đổi tên',
+                onPressed: () => _showNameEditDialog(provider),
+              ),
+            ],
+          ),
+        ),
           
         const SizedBox(height: 20),
         
@@ -272,7 +323,7 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
           margin: const EdgeInsets.symmetric(horizontal: 16),
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Colors.orange.withOpacity(0.1),
+            color: Colors.orange.withAlpha(25),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: Colors.orange),
           ),
@@ -340,7 +391,7 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
             color: theme.cardColor,
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.1),
+                color: Colors.black.withAlpha(25),
                 blurRadius: 10,
                 offset: const Offset(0, -5),
               ),
@@ -472,5 +523,45 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
         );
       }
     }
+  }
+
+  void _showNameEditDialog(BattleProvider provider) {
+    final controller = TextEditingController(text: provider.myName);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Đổi tên hiển thị'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Tên mới',
+            prefixIcon: Icon(Icons.person),
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (val) {
+            if (val.trim().isNotEmpty) {
+              provider.setPlayerName(val.trim());
+            }
+            Navigator.pop(ctx);
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Hủy'),
+          ),
+          TextButton(
+            onPressed: () {
+              if (controller.text.trim().isNotEmpty) {
+                provider.setPlayerName(controller.text.trim());
+              }
+              Navigator.pop(ctx);
+            },
+            child: const Text('Lưu'),
+          ),
+        ],
+      ),
+    );
   }
 }

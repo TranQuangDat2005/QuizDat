@@ -1,18 +1,26 @@
 import 'package:googleapis/sheets/v4.dart' as sheets;
 import 'google_sheets_service.dart';
+import 'database_helper.dart';
 import '../models/card.dart';
 
 /// Adapter to convert Google Sheets data to Card operations
 class GoogleSheetsCardAdapter {
   final GoogleSheetsService _sheets = GoogleSheetsService();
+  final DatabaseHelper _db = DatabaseHelper();
   static const _sheetName = 'Card';
 
-  /// Get all cards from Google Sheets
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  static int    _parseInt(String? v, [int d = 0])      => int.tryParse(v ?? '') ?? d;
+  static double _parseDbl(String? v, [double d = 2.5]) => double.tryParse(v ?? '') ?? d;
+
+
+  /// Get all cards from Google Sheets.
+  /// Also upserts SM-2 progress columns into local SQLite so the app can use them.
   Future<List<VocabCard>> getAllCards() async {
     try {
       final rows = await _sheets.getSheetMaps(_sheetName);
-      
-      return rows.map((row) {
+
+      final cards = rows.map((row) {
         return VocabCard(
           cardId: row['card_id'] ?? '',
           term: row['term'] ?? '',
@@ -21,6 +29,35 @@ class GoogleSheetsCardAdapter {
           setId: row['set_id'] ?? '',
         );
       }).toList();
+
+      // Sync SM-2 progress from Sheets → local SQLite
+      for (final row in rows) {
+        final cardId = row['card_id'] ?? '';
+        if (cardId.isEmpty) continue;
+
+        if (row.containsKey('flip_rep') && row['flip_rep']!.isNotEmpty) {
+          await _db.upsertSm2Progress({
+            'card_id': cardId,
+            'card_type': 'flip',
+            'repetitions':   _parseInt(row['flip_rep']),
+            'ease_factor':   _parseDbl(row['flip_ease']),
+            'interval_days': _parseInt(row['flip_interval'], 1),
+            'next_review':   row['flip_next']?.isNotEmpty == true ? row['flip_next'] : null,
+          });
+        }
+        if (row.containsKey('type_rep') && row['type_rep']!.isNotEmpty) {
+          await _db.upsertSm2Progress({
+            'card_id': cardId,
+            'card_type': 'typing',
+            'repetitions':   _parseInt(row['type_rep']),
+            'ease_factor':   _parseDbl(row['type_ease']),
+            'interval_days': _parseInt(row['type_interval'], 1),
+            'next_review':   row['type_next']?.isNotEmpty == true ? row['type_next'] : null,
+          });
+        }
+      }
+
+      return cards;
     } catch (e) {
       print('❌ Error reading cards from Sheets: $e');
       rethrow;
@@ -177,35 +214,45 @@ class GoogleSheetsCardAdapter {
         final rowIndex = idToRowIndex[cardId];
         if (rowIndex == null) continue;
 
-        // Create row data
-        // Order: card_id, term, definition, state, set_id
-        // We need 'set_id' to complete the row if we are updating whole row?
-        // updateCells with fields='*' updates specific fields if we provide them?
-        // No, RowData updates the whole row if we don't specify carefully, or we need to know all values.
-        // Implementation plan says "bulkUpdateCards".
-        // `CardService` calls `updateCardsBulk` with term, definition, state.
-        // It DOES NOT pass set_id.
-        // So we should only update specific cells (term, definition, state).
-        // Columns: 0:id, 1:term, 2:definition, 3:state, 4:set_id
-        
-        final values = [
+        // Columns 1-3: term, definition, state
+        final baseValues = [
           sheets.CellData(userEnteredValue: sheets.ExtendedValue(stringValue: update['term'])),
           sheets.CellData(userEnteredValue: sheets.ExtendedValue(stringValue: update['definition'])),
           sheets.CellData(userEnteredValue: sheets.ExtendedValue(stringValue: update['state'])),
         ];
 
-        final request = sheets.Request(
+        requests.add(sheets.Request(
           updateCells: sheets.UpdateCellsRequest(
-            start: sheets.GridCoordinate(
-              sheetId: sheetId,
-              rowIndex: rowIndex,
-              columnIndex: 1, // Start from 'term' column
-            ),
-            rows: [sheets.RowData(values: values)],
-            fields: '*', // Update provided fields
+            start: sheets.GridCoordinate(sheetId: sheetId, rowIndex: rowIndex, columnIndex: 1),
+            rows: [sheets.RowData(values: baseValues)],
+            fields: '*',
           ),
-        );
-        requests.add(request);
+        ));
+
+        // Columns 5-12: SM-2 progress (flip then typing)
+        final flipP = await _db.getSm2ProgressTyped(cardId.toString(), 'flip');
+        final typeP = await _db.getSm2ProgressTyped(cardId.toString(), 'typing');
+
+        String _s(dynamic v) => v?.toString() ?? '';
+
+        final sm2Values = [
+          sheets.CellData(userEnteredValue: sheets.ExtendedValue(stringValue: _s(flipP?['repetitions']))),
+          sheets.CellData(userEnteredValue: sheets.ExtendedValue(stringValue: _s(flipP?['ease_factor']))),
+          sheets.CellData(userEnteredValue: sheets.ExtendedValue(stringValue: _s(flipP?['interval_days']))),
+          sheets.CellData(userEnteredValue: sheets.ExtendedValue(stringValue: _s(flipP?['next_review']))),
+          sheets.CellData(userEnteredValue: sheets.ExtendedValue(stringValue: _s(typeP?['repetitions']))),
+          sheets.CellData(userEnteredValue: sheets.ExtendedValue(stringValue: _s(typeP?['ease_factor']))),
+          sheets.CellData(userEnteredValue: sheets.ExtendedValue(stringValue: _s(typeP?['interval_days']))),
+          sheets.CellData(userEnteredValue: sheets.ExtendedValue(stringValue: _s(typeP?['next_review']))),
+        ];
+
+        requests.add(sheets.Request(
+          updateCells: sheets.UpdateCellsRequest(
+            start: sheets.GridCoordinate(sheetId: sheetId, rowIndex: rowIndex, columnIndex: 5),
+            rows: [sheets.RowData(values: sm2Values)],
+            fields: '*',
+          ),
+        ));
       }
 
       if (requests.isNotEmpty) {
@@ -216,6 +263,7 @@ class GoogleSheetsCardAdapter {
       rethrow;
     }
   }
+
 
   /// Delete card from Google Sheets
   Future<bool> deleteCard(String id) async {

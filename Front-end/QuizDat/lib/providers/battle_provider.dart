@@ -37,8 +37,31 @@ class BattleProvider with ChangeNotifier {
   bool _isStarted = false;
   bool get isStarted => _isStarted;
 
+  // Synchronized question index (driven by host)
+  int _currentQuestionIndex = 0;
+  int get currentQuestionIndex => _currentQuestionIndex;
+
+  // Whether the current question has been locked (someone answered correctly)
+  bool _isQuestionLocked = false;
+  bool get isQuestionLocked => _isQuestionLocked;
+
+  // deviceId of the player who answered the current question correctly (null = nobody yet)
+  String? _currentQuestionWinner;
+  String? get currentQuestionWinner => _currentQuestionWinner;
+
+  // Whether the whole quiz is finished
+  bool _isGameOver = false;
+  bool get isGameOver => _isGameOver;
+
+  // Timer (seconds remaining for the current question)
+  static const int questionTimeLimit = 15; // seconds per question
+  int _timerSeconds = questionTimeLimit;
+  int get timerSeconds => _timerSeconds;
+  Timer? _questionTimer;
+
   String _myDeviceId = '';
   String _myName = 'Player';
+  String get myName => _myName;
   
   BattleProvider() {
     _initDevice();
@@ -54,11 +77,39 @@ class BattleProvider with ChangeNotifier {
     }
   }
 
+  /// ALL: Set a custom display name
+  Future<void> setPlayerName(String name) async {
+    if (name.trim().isEmpty) return;
+    _myName = name.trim();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('user_name', _myName);
+
+    // Update in players list
+    final idx = _players.indexWhere((p) => p.deviceId == _myDeviceId);
+    if (idx != -1) {
+      _players[idx] = _players[idx].copyWith(name: _myName);
+    }
+
+    if (_isHost) {
+      _broadcastLobbyUpdate();
+    } else if (_clientSocket != null) {
+      _sendMessageAsGuest(BattleMessage(
+        type: BattleMessageTypes.nameChange,
+        payload: {'deviceId': _myDeviceId, 'name': _myName},
+      ));
+    }
+    notifyListeners();
+  }
+
   /// HOST: Start the server
   Future<bool> startHosting() async {
     try {
-      final info = NetworkInfo();
-      _localIp = await info.getWifiIP() ?? '127.0.0.1';
+      try {
+        final info = NetworkInfo();
+        _localIp = await info.getWifiIP() ?? '127.0.0.1';
+      } catch (e) {
+        _localIp = '127.0.0.1'; // Fallback for tests
+      }
       
       _serverSocket = await ServerSocket.bind(InternetAddress.anyIPv4, 4040);
       _isHost = true;
@@ -137,17 +188,100 @@ class BattleProvider with ChangeNotifier {
           _players[playerIndex].isReady = true;
           _broadcastLobbyUpdate();
         }
-      } else if (msg.type == BattleMessageTypes.scoreUpdate) {
-        final deviceId = msg.payload!['deviceId'];
-        final score = msg.payload!['score'];
+      } else if (msg.type == BattleMessageTypes.nameChange) {
+        final deviceId = msg.payload!['deviceId'] as String;
+        final newName = msg.payload!['name'] as String;
         final playerIndex = _players.indexWhere((p) => p.deviceId == deviceId);
         if (playerIndex != -1) {
-          _players[playerIndex].score = score;
-          _broadcastScoreUpdate(deviceId, score);
+          _players[playerIndex] = _players[playerIndex].copyWith(name: newName);
+          _broadcastLobbyUpdate();
+        }
+      } else if (msg.type == BattleMessageTypes.questionAnswered) {
+        // A guest answered the current question
+        final deviceId = msg.payload!['deviceId'] as String;
+        final isCorrect = msg.payload!['isCorrect'] as bool;
+        final questionIndex = msg.payload!['questionIndex'] as int;
+
+        // Ignore if this is for an old question or already locked
+        if (questionIndex != _currentQuestionIndex) return;
+        if (_isQuestionLocked && isCorrect) return;
+
+        if (isCorrect) {
+          // Award points and lock the question
+          final playerIndex = _players.indexWhere((p) => p.deviceId == deviceId);
+          if (playerIndex != -1) {
+            _players[playerIndex].score += 10;
+            _broadcastScoreUpdate(deviceId, _players[playerIndex].score);
+          }
+          _isQuestionLocked = true;
+          _currentQuestionWinner = deviceId;
+          _questionTimer?.cancel();
+          _broadcast(BattleMessage(
+            type: BattleMessageTypes.questionLocked,
+            payload: {'winnerDeviceId': deviceId, 'questionIndex': questionIndex},
+          ));
+          notifyListeners();
+
+          // Auto-advance to next question after a short delay
+          Future.delayed(const Duration(seconds: 2), () {
+            _advanceQuestion();
+          });
         }
       }
     } catch (e) {
       print('Error parsing message as host: $e');
+    }
+  }
+
+  /// HOST: Start the per-question countdown timer
+  void _startQuestionTimer() {
+    _questionTimer?.cancel();
+    _timerSeconds = questionTimeLimit;
+    notifyListeners();
+
+    _questionTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      _timerSeconds--;
+      // Broadcast tick to guests
+      _broadcast(BattleMessage(
+        type: BattleMessageTypes.timerTick,
+        payload: {'seconds': _timerSeconds},
+      ));
+      notifyListeners();
+
+      if (_timerSeconds <= 0) {
+        timer.cancel();
+        // Time's up — no one got it right, advance
+        if (!_isQuestionLocked) {
+          _advanceQuestion();
+        }
+      }
+    });
+  }
+
+  /// HOST: Move to next question (or end game)
+  void _advanceQuestion() {
+    if (!_isHost) return;
+    _questionTimer?.cancel();
+    final nextIndex = _currentQuestionIndex + 1;
+    if (nextIndex >= _quizCards.length) {
+      // Game over
+      _isGameOver = true;
+      _broadcast(BattleMessage(
+        type: BattleMessageTypes.gameOver,
+        payload: {'players': _players.map((p) => p.toJson()).toList()},
+      ));
+      notifyListeners();
+    } else {
+      _currentQuestionIndex = nextIndex;
+      _isQuestionLocked = false;
+      _currentQuestionWinner = null;
+      _timerSeconds = questionTimeLimit;
+      _broadcast(BattleMessage(
+        type: BattleMessageTypes.nextQuestion,
+        payload: {'questionIndex': nextIndex},
+      ));
+      notifyListeners();
+      _startQuestionTimer();
     }
   }
 
@@ -200,10 +334,26 @@ class BattleProvider with ChangeNotifier {
     if (!_isHost) return;
     // Check if everyone is ready
     if (!_players.every((p) => p.isReady)) return;
-    
+
     _isStarted = true;
-    _broadcast(BattleMessage(type: BattleMessageTypes.start));
+    _currentQuestionIndex = 0;
+    _isQuestionLocked = false;
+    _currentQuestionWinner = null;
+    _isGameOver = false;
+    _timerSeconds = questionTimeLimit;
+
+    // Reset scores
+    for (var p in _players) {
+      p.score = 0;
+    }
+
+    // Broadcast start with the first question index
+    _broadcast(BattleMessage(
+      type: BattleMessageTypes.start,
+      payload: {'questionIndex': 0},
+    ));
     notifyListeners();
+    _startQuestionTimer();
   }
 
   /// GUEST: Join a host
@@ -263,6 +413,21 @@ class BattleProvider with ChangeNotifier {
         notifyListeners();
       } else if (msg.type == BattleMessageTypes.start) {
         _isStarted = true;
+        _currentQuestionIndex = msg.payload?['questionIndex'] ?? 0;
+        _isQuestionLocked = false;
+        _currentQuestionWinner = null;
+        _isGameOver = false;
+        _timerSeconds = questionTimeLimit;
+        notifyListeners();
+      } else if (msg.type == BattleMessageTypes.nextQuestion) {
+        _currentQuestionIndex = msg.payload!['questionIndex'] as int;
+        _isQuestionLocked = false;
+        _currentQuestionWinner = null;
+        _timerSeconds = questionTimeLimit;
+        notifyListeners();
+      } else if (msg.type == BattleMessageTypes.questionLocked) {
+        _isQuestionLocked = true;
+        _currentQuestionWinner = msg.payload!['winnerDeviceId'] as String;
         notifyListeners();
       } else if (msg.type == BattleMessageTypes.scoreUpdate) {
         final deviceId = msg.payload!['deviceId'];
@@ -272,6 +437,20 @@ class BattleProvider with ChangeNotifier {
           _players[playerIndex].score = score;
           notifyListeners();
         }
+      } else if (msg.type == BattleMessageTypes.timerTick) {
+        _timerSeconds = msg.payload!['seconds'] as int;
+        notifyListeners();
+      } else if (msg.type == BattleMessageTypes.gameOver) {
+        _isGameOver = true;
+        // Sync final player list from host
+        if (msg.payload?['players'] != null) {
+          _players.clear();
+          final list = msg.payload!['players'] as List;
+          for (var p in list) {
+            _players.add(BattlePlayer.fromJson(p));
+          }
+        }
+        notifyListeners();
       } else if (msg.type == BattleMessageTypes.kick) {
         disconnect();
       }
@@ -301,26 +480,54 @@ class BattleProvider with ChangeNotifier {
     }
   }
 
-  /// ALL: Update score
-  void updateMyScore(int points) {
-    final idx = _players.indexWhere((p) => p.deviceId == _myDeviceId);
-    if (idx != -1) {
-      _players[idx].score += points;
-      
-      if (_isHost) {
-        _broadcastScoreUpdate(_myDeviceId, _players[idx].score);
-      } else {
-        _sendMessageAsGuest(BattleMessage(
-          type: BattleMessageTypes.scoreUpdate,
-          payload: {'deviceId': _myDeviceId, 'score': _players[idx].score}
+  /// ALL: Submit answer to current question.
+  /// [isCorrect] – whether the selected answer was correct.
+  void submitAnswer(bool isCorrect) {
+    if (_isQuestionLocked) return; // Question already won by someone else
+
+    if (_isHost) {
+      // Host answers locally; resolve immediately
+      if (isCorrect) {
+        final idx = _players.indexWhere((p) => p.deviceId == _myDeviceId);
+        if (idx != -1) {
+          _players[idx].score += 10;
+          _broadcastScoreUpdate(_myDeviceId, _players[idx].score);
+        }
+        _isQuestionLocked = true;
+        _currentQuestionWinner = _myDeviceId;
+        _questionTimer?.cancel();
+        _broadcast(BattleMessage(
+          type: BattleMessageTypes.questionLocked,
+          payload: {'winnerDeviceId': _myDeviceId, 'questionIndex': _currentQuestionIndex},
         ));
+        notifyListeners();
+        Future.delayed(const Duration(seconds: 2), () {
+          _advanceQuestion();
+        });
       }
-      notifyListeners();
+    } else {
+      // Guest sends answer to host
+      _sendMessageAsGuest(BattleMessage(
+        type: BattleMessageTypes.questionAnswered,
+        payload: {
+          'deviceId': _myDeviceId,
+          'isCorrect': isCorrect,
+          'questionIndex': _currentQuestionIndex,
+        },
+      ));
+
+      // Optimistic: if wrong, no UI change needed
+      // Winner & lock will come back from host via QUESTION_LOCKED
     }
   }
 
+  String get myDeviceId => _myDeviceId;
+
   /// Disconnect and clean up
   void disconnect() {
+    _questionTimer?.cancel();
+    _questionTimer = null;
+
     _serverSocket?.close();
     _serverSocket = null;
     
@@ -338,7 +545,12 @@ class BattleProvider with ChangeNotifier {
     _players.clear();
     _selectedSet = null;
     _quizCards.clear();
-    
+    _currentQuestionIndex = 0;
+    _isQuestionLocked = false;
+    _currentQuestionWinner = null;
+    _isGameOver = false;
+    _timerSeconds = questionTimeLimit;
+
     notifyListeners();
   }
 

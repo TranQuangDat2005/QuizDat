@@ -98,7 +98,7 @@ class _VocabSetLibraryState extends State<VocabSetLibrary>
   Future<void> _loadSm2Stats() async {
     if (_originalCards.isEmpty) return;
     final result = await _sm2Service.getCardsForReviewWithLimits(_originalCards);
-    final stats = await _sm2Service.getDailyStats();
+    final stats = await _sm2Service.getDailyStats(_originalCards);
     if (!mounted) return;
     setState(() {
       _sm2NewCount = result.newCards.length;

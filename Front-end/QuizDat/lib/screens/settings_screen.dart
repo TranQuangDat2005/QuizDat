@@ -33,6 +33,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _sm2ReviewLimit = 200;
   bool _sm2BuryRelated = true;
 
+  // Anki algorithm params
+  double _baseEase = 2.5;
+  double _easyBonus = 1.3;
+  double _lapseInterval = 0.5;
+  double _graduatingInterval = 1.0;
+  double _easyInterval = 4.0;
+
   bool get _isLocalMode => _storageMode == ConfigManager.storageModeLocal;
 
   @override
@@ -40,6 +47,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     _loadCurrentConfig();
     _loadSm2Limits();
+    _loadAnkiParams();
   }
 
   @override
@@ -78,6 +86,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _saveSm2Limits() async {
     await _sm2.saveLimits(newLimit: _sm2NewLimit, reviewLimit: _sm2ReviewLimit);
     await _sm2.setBuryRelated(_sm2BuryRelated);
+  }
+
+  Future<void> _loadAnkiParams() async {
+    final db = _sm2.db;
+    final bE = await db.getBaseEase();
+    final eB = await db.getEasyBonus();
+    final lI = await db.getLapseInterval();
+    final gI = await db.getGraduatingInterval();
+    final eI = await db.getEasyInterval();
+    if (!mounted) return;
+    setState(() {
+      _baseEase = bE;
+      _easyBonus = eB;
+      _lapseInterval = lI;
+      _graduatingInterval = gI;
+      _easyInterval = eI;
+    });
+  }
+
+  Future<void> _saveAnkiParam(String key, double value) async {
+    final db = _sm2.db;
+    await db.setAnkiParam(key, value);
+    _loadAnkiParams();
   }
 
   Future<void> _pickCredentialsFile() async {
@@ -611,6 +642,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ],
                   ),
                 ),
+                const SizedBox(height: 24),
+
+                // Anki algorithm params
+                Text(
+                  'Thông số thuật toán Anki',
+                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Giá trị mặc định theo chuẩn Anki. Thay đổi nếu bạn muốn cá nhân hoá tốc độ ôn tập.',
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: theme.cardColor,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: theme.dividerColor),
+                  ),
+                  child: Column(
+                    children: [
+                      _buildAnkiParamRow('Hệ số Ease mặc định', 'base_ease', _baseEase, 1.3, 5.0,
+                          'Ease khởi đầu của thẻ mới (Anki: 2.50)'),
+                      const Divider(height: 20),
+                      _buildAnkiParamRow('Bonus Easy', 'easy_bonus', _easyBonus, 1.0, 3.0,
+                          'Nhân thêm khi chọn Dễ (Anki: 1.30)'),
+                      const Divider(height: 20),
+                      _buildAnkiParamRow('Hệ số Lapse (Quên)', 'lapse_interval', _lapseInterval, 0.1, 1.0,
+                          'Cắt interval khi quên (Anki: 0.50)'),
+                      const Divider(height: 20),
+                      _buildAnkiParamRow('Graduating Interval (ngày)', 'graduating_interval', _graduatingInterval, 1.0, 30.0,
+                          'Số ngày sau khi chọn Tốt lần đầu (Anki: 1)'),
+                      const Divider(height: 20),
+                      _buildAnkiParamRow('Easy Interval (ngày)', 'easy_interval', _easyInterval, 1.0, 30.0,
+                          'Số ngày sau khi chọn Dễ lần đầu (Anki: 4)'),
+                    ],
+                  ),
+                ),
                 const SizedBox(height: 32),
 
                 // Storage Mode Card
@@ -862,6 +932,78 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         ),
       ],
+    );
+  }
+
+  Widget _buildAnkiParamRow(String label, String key, double value, double min, double max, String hint) {
+    final theme = Theme.of(context);
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () async {
+        final ctrl = TextEditingController(text: value.toString());
+        final result = await showDialog<double>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: theme.cardColor,
+            title: Text(label, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(hint, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: ctrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    labelText: 'Giá trị ($min – $max)',
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Hủy')),
+              ElevatedButton(
+                onPressed: () {
+                  final v = double.tryParse(ctrl.text);
+                  if (v != null && v >= min && v <= max) Navigator.pop(ctx, v);
+                },
+                child: const Text('Lưu'),
+              ),
+            ],
+          ),
+        );
+        if (result != null) await _saveAnkiParam(key, result);
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            const Icon(Icons.tune, size: 20, color: Colors.deepPurple),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                  Text(hint, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant, fontSize: 11)),
+                ],
+              ),
+            ),
+            Text(
+              value.toString(),
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(Icons.edit, size: 16, color: theme.iconTheme.color?.withOpacity(0.4)),
+          ],
+        ),
+      ),
     );
   }
 

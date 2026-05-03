@@ -294,12 +294,21 @@ class GoogleSheetsService {
       final spreadsheet = await _sheetsApi!.spreadsheets.get(_currentSheetId!);
       final existingSheets = spreadsheet.sheets?.map((s) => s.properties?.title).toList() ?? [];
 
-      final requiredSheets = ['Repository', 'SetCard', 'Card', 'Calendar'];
+      // Card sheet has 8 extra SM-2 progress columns (4 per mode: flip & typing)
+      final requiredSheets = ['Repository', 'SetCard', 'Card', 'Calendar', 'SM2Settings'];
       final headers = {
         'Repository': ['repository_id', 'name', 'description'],
         'SetCard': ['set_id', 'name', 'repository_id', 'last_learned_time'],
-        'Card': ['card_id', 'term', 'definition', 'state', 'set_id'],
+        'Card': [
+          'card_id', 'term', 'definition', 'state', 'set_id',
+          // SM-2 progress for Flip mode
+          'flip_rep', 'flip_ease', 'flip_interval', 'flip_next',
+          // SM-2 progress for Typing mode
+          'type_rep', 'type_ease', 'type_interval', 'type_next',
+        ],
         'Calendar': ['calendar_id', 'title', 'description', 'date', 'type', 'is_done', 'created_at'],
+        // Anki algorithm parameters (key-value store)
+        'SM2Settings': ['key', 'value'],
       };
 
       for (final sheetName in requiredSheets) {
@@ -319,6 +328,19 @@ class GoogleSheetsService {
 
           // Add headers
           await appendRows(sheetName, [headers[sheetName]!]);
+
+          // Seed SM2Settings with Anki defaults
+          if (sheetName == 'SM2Settings') {
+            await appendRows('SM2Settings', [
+              ['base_ease', '2.5'],
+              ['easy_bonus', '1.3'],
+              ['lapse_interval', '0.5'],
+              ['graduating_interval', '1'],
+              ['easy_interval', '4'],
+              ['new_limit', '20'],
+              ['review_limit', '200'],
+            ]);
+          }
         }
       }
     } catch (e) {

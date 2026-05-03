@@ -90,4 +90,19 @@ class BattleMessageTypes {
   static const scoreUpdate = 'SCORE_UPDATE';
   static const gameOver = 'GAME_OVER';
   static const kick = 'KICK';
+
+  /// Host broadcasts index of the current question to all players
+  static const nextQuestion = 'NEXT_QUESTION';
+
+  /// A player sends this to host when they answer (correct or wrong)
+  static const questionAnswered = 'QUESTION_ANSWERED';
+
+  /// Host broadcasts this when someone answered correctly, locking the question
+  static const questionLocked = 'QUESTION_LOCKED';
+
+  /// Host broadcasts timer tick every second
+  static const timerTick = 'TIMER_TICK';
+
+  /// Player changes their display name
+  static const nameChange = 'NAME_CHANGE';
 }

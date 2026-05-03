@@ -126,8 +126,7 @@ class _Sm2ReviewScreenState extends State<Sm2ReviewScreen>
     final originalQueue = await _sm2.getReviewQueue(widget.allCards);
     if (!mounted) return;
 
-    // Với mỗi FlipCard trong queue, tạo thêm một bản sao chiều B
-    // Typing card giữ nguyên
+    // Mỗi thẻ chỉ xuất hiện 1 lần theo chiều A (từ ngôn ngữ học -> ngôn ngữ mẹ đẻ)
     final expandedQueue = <SM2Card>[];
     final expandedDirs = <SM2FlipDir?>[];
 
@@ -135,8 +134,6 @@ class _Sm2ReviewScreenState extends State<Sm2ReviewScreen>
       if (card.cardType == SM2CardType.flip) {
         expandedQueue.add(card);
         expandedDirs.add(SM2FlipDir.aLearningFirst);
-        expandedQueue.add(card);
-        expandedDirs.add(SM2FlipDir.bNativeFirst);
       } else {
         expandedQueue.add(card);
         expandedDirs.add(null);
@@ -160,14 +157,14 @@ class _Sm2ReviewScreenState extends State<Sm2ReviewScreen>
     if (_queue.isNotEmpty) _loadNext();
   }
 
-  void _loadNext() {
+  Future<void> _loadNext() async {
     if (_queue.isEmpty) {
       setState(() => _sessionDone = true);
       return;
     }
     final card = _queue.removeAt(0);
     final dir = _queueDirs.removeAt(0);
-    _intervals = _sm2.previewIntervals(
+    final intervals = await _sm2.previewIntervals(
       repetitions: card.repetitions,
       easeFactor: card.easeFactor,
       intervalDays: card.intervalDays,
@@ -179,6 +176,7 @@ class _Sm2ReviewScreenState extends State<Sm2ReviewScreen>
       _currentDir = dir;
       _phase = _CardPhase.front;
       _userAnswer = '';
+      _intervals = intervals;
     });
   }
 
@@ -716,27 +714,21 @@ class _Sm2ReviewScreenState extends State<Sm2ReviewScreen>
   }
 
   Widget _buildRatingButtons() {
-    int? suggested;
-    if (_current!.cardType == SM2CardType.typing) {
-      final correct = _backText;
-      suggested = _normalize(_userAnswer) == _normalize(correct) ? 4 : 1;
-    }
-
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Row(children: [
-        _rBtn('Lại', SM2Service.formatInterval(_intervals['again']!), const Color(0xFFEF5350), 1, suggested == 1),
+        _rBtn('Lại', SM2Service.formatInterval(_intervals['again']!), const Color(0xFFEF5350), 1),
         const SizedBox(width: 8),
-        _rBtn('Khó', SM2Service.formatInterval(_intervals['hard']!), const Color(0xFFFF9800), 3, suggested == 3),
+        _rBtn('Khó', SM2Service.formatInterval(_intervals['hard']!), const Color(0xFFFF9800), 3),
         const SizedBox(width: 8),
-        _rBtn('Tốt', SM2Service.formatInterval(_intervals['good']!), const Color(0xFF4CAF50), 4, suggested == 4),
+        _rBtn('Tốt', SM2Service.formatInterval(_intervals['good']!), const Color(0xFF4CAF50), 4),
         const SizedBox(width: 8),
-        _rBtn('Dễ', SM2Service.formatInterval(_intervals['easy']!), const Color(0xFF2196F3), 5, suggested == 5),
+        _rBtn('Dễ', SM2Service.formatInterval(_intervals['easy']!), const Color(0xFF2196F3), 5),
       ]),
     );
   }
 
-  Widget _rBtn(String label, String sub, Color color, int quality, bool suggested) {
+  Widget _rBtn(String label, String sub, Color color, int quality) {
     return Expanded(
       child: GestureDetector(
         onTap: () => _rate(quality),
@@ -744,15 +736,14 @@ class _Sm2ReviewScreenState extends State<Sm2ReviewScreen>
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(
-            color: suggested ? color.withValues(alpha: 0.25) : color.withValues(alpha: 0.12),
-            border: Border.all(color: suggested ? color : color.withValues(alpha: 0.5), width: suggested ? 2.5 : 1.5),
+            color: color.withValues(alpha: 0.12),
+            border: Border.all(color: color.withValues(alpha: 0.5), width: 1.5),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Text(sub, style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
             Text(label, style: TextStyle(fontSize: 15, color: color, fontWeight: FontWeight.w900)),
-            if (suggested) Icon(Icons.arrow_upward_rounded, size: 12, color: color),
           ]),
         ),
       ),

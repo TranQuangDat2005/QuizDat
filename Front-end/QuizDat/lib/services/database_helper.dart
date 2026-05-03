@@ -34,7 +34,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       dbPath,
-      version: 5,
+      version: 6,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
       onOpen: (db) async {
@@ -260,6 +260,10 @@ class DatabaseHelper {
         )
       ''');
     }
+    if (oldVersion < 6) {
+      // No structural changes — Anki settings are seeded on first read via defaults.
+      // SM2Settings key-value table already exists from v3.
+    }
   }
 
   // ==========================================
@@ -291,6 +295,34 @@ class DatabaseHelper {
     await db.insert('SM2Settings', {'key': 'review_limit', 'value': limit.toString()},
         conflictAlgorithm: ConflictAlgorithm.replace);
   }
+
+  // ── Anki Algorithm Parameters ──────────────────────────────────────────────
+
+  Future<double> getAnkiParam(String key, double defaultVal) async {
+    final db = await database;
+    final results = await db.query('SM2Settings', where: 'key = ?', whereArgs: [key]);
+    if (results.isEmpty) return defaultVal;
+    return double.tryParse(results.first['value'] as String? ?? '') ?? defaultVal;
+  }
+
+  Future<void> setAnkiParam(String key, double value) async {
+    final db = await database;
+    await db.insert('SM2Settings', {'key': key, 'value': value.toString()},
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  // Convenience getters with Anki defaults
+  Future<double> getBaseEase()           => getAnkiParam('base_ease', 2.5);
+  Future<double> getEasyBonus()          => getAnkiParam('easy_bonus', 1.3);
+  Future<double> getLapseInterval()      => getAnkiParam('lapse_interval', 0.5);
+  Future<double> getGraduatingInterval() => getAnkiParam('graduating_interval', 1.0);
+  Future<double> getEasyInterval()       => getAnkiParam('easy_interval', 4.0);
+
+  Future<void> setBaseEase(double v)           => setAnkiParam('base_ease', v);
+  Future<void> setEasyBonus(double v)          => setAnkiParam('easy_bonus', v);
+  Future<void> setLapseInterval(double v)      => setAnkiParam('lapse_interval', v);
+  Future<void> setGraduatingInterval(double v) => setAnkiParam('graduating_interval', v);
+  Future<void> setEasyInterval(double v)       => setAnkiParam('easy_interval', v);
 
   Future<bool> getSm2BuryRelated() async {
     final db = await database;

@@ -52,35 +52,84 @@ class SM2Service {
 
   final DatabaseHelper _db = DatabaseHelper();
 
+  /// Expose the underlying DB helper (for Anki param access in Settings).
+  DatabaseHelper get db => _db;
+
   // ─── SM-2 ALGORITHM ────────────────────────────────────────────────────────
 
-  /// Compute next SM-2 values. quality: 1=Again, 3=Hard, 4=Good, 5=Easy
+  /// Load all Anki parameters from DB (with defaults).
+  Future<Map<String, double>> _loadAnkiParams() async {
+    return {
+      'baseEase':           await _db.getBaseEase(),           // 2.5
+      'easyBonus':          await _db.getEasyBonus(),          // 1.3
+      'lapseInterval':      await _db.getLapseInterval(),      // 0.5
+      'graduatingInterval': await _db.getGraduatingInterval(), // 1.0
+      'easyInterval':       await _db.getEasyInterval(),       // 4.0
+    };
+  }
+
+  /// Compute next SM-2 values using Anki rules.
+  /// quality: 1=Again, 3=Hard, 4=Good, 5=Easy
+  /// Params are passed in directly (load them once with _loadAnkiParams()).
   SM2Result computeNext({
     required int quality,
     required int repetitions,
     required double easeFactor,
     required int intervalDays,
+    double baseEase = 2.5,
+    double easyBonus = 1.3,
+    double lapseInterval = 0.5,
+    double graduatingInterval = 1.0,
+    double easyInterval = 4.0,
   }) {
     int newRep;
     double newEF;
     int newInterval;
 
-    if (quality < 3) {
+    if (quality == 1) {
+      // Again – reset to learning, ease drops
       newRep = 0;
-      newInterval = 1;
-      newEF = easeFactor;
-    } else {
-      newRep = repetitions + 1;
-      if (newRep == 1) {
+      if (repetitions == 0) {
+        // Still in first learning – start over at 1 day
         newInterval = 1;
-      } else if (newRep == 2) {
-        newInterval = 6;
+      } else {
+        // Lapse: cut interval by lapseInterval (min 1)
+        newInterval = (intervalDays * lapseInterval).round().clamp(1, 999999);
+      }
+      newEF = (easeFactor - 0.20).clamp(1.3, 9.9);
+    } else if (quality == 3) {
+      // Hard
+      newRep = repetitions + 1;
+      if (repetitions == 0) {
+        newInterval = graduatingInterval.round(); // graduating day (same as Good for first)
+      } else {
+        newInterval = (intervalDays * 1.2).round();
+        if (newInterval <= intervalDays) newInterval = intervalDays + 1;
+      }
+      newEF = (easeFactor - 0.15).clamp(1.3, 9.9);
+    } else if (quality == 4) {
+      // Good
+      newRep = repetitions + 1;
+      if (repetitions == 0) {
+        newInterval = graduatingInterval.round(); // 1 day default
+      } else if (repetitions == 1) {
+        newInterval = (graduatingInterval * easeFactor).round().clamp(2, 999999);
       } else {
         newInterval = (intervalDays * easeFactor).round();
-        if (newInterval < intervalDays + 1) newInterval = intervalDays + 1;
+        if (newInterval <= intervalDays) newInterval = intervalDays + 1;
       }
-      newEF = easeFactor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
-      if (newEF < 1.3) newEF = 1.3;
+      // Good: ease unchanged
+      newEF = easeFactor;
+    } else {
+      // Easy (quality == 5)
+      newRep = repetitions + 1;
+      if (repetitions == 0) {
+        newInterval = easyInterval.round(); // 4 days default
+      } else {
+        newInterval = (intervalDays * easeFactor * easyBonus).round();
+        if (newInterval <= intervalDays) newInterval = intervalDays + 1;
+      }
+      newEF = (easeFactor + 0.15).clamp(1.3, 9.9);
     }
 
     final nextDate = DateTime.now().add(Duration(days: newInterval));
@@ -94,19 +143,32 @@ class SM2Service {
     );
   }
 
-  /// Preview interval for 4 rating buttons
-  Map<String, int> previewIntervals({
+  /// Preview interval for 4 rating buttons (async to load params from DB).
+  Future<Map<String, int>> previewIntervals({
     required int repetitions,
     required double easeFactor,
     required int intervalDays,
-  }) {
+  }) async {
+    final p = await _loadAnkiParams();
+    int _calc(int q) => computeNext(
+      quality: q,
+      repetitions: repetitions,
+      easeFactor: easeFactor,
+      intervalDays: intervalDays,
+      baseEase: p['baseEase']!,
+      easyBonus: p['easyBonus']!,
+      lapseInterval: p['lapseInterval']!,
+      graduatingInterval: p['graduatingInterval']!,
+      easyInterval: p['easyInterval']!,
+    ).intervalDays;
     return {
-      'again': computeNext(quality: 1, repetitions: repetitions, easeFactor: easeFactor, intervalDays: intervalDays).intervalDays,
-      'hard':  computeNext(quality: 3, repetitions: repetitions, easeFactor: easeFactor, intervalDays: intervalDays).intervalDays,
-      'good':  computeNext(quality: 4, repetitions: repetitions, easeFactor: easeFactor, intervalDays: intervalDays).intervalDays,
-      'easy':  computeNext(quality: 5, repetitions: repetitions, easeFactor: easeFactor, intervalDays: intervalDays).intervalDays,
+      'again': _calc(1),
+      'hard':  _calc(3),
+      'good':  _calc(4),
+      'easy':  _calc(5),
     };
   }
+
 
   // ─── QUEUE BUILDING ────────────────────────────────────────────────────────
 
@@ -191,11 +253,17 @@ class SM2Service {
     required SM2Card card,
     required int quality,
   }) async {
+    final p = await _loadAnkiParams();
     final result = computeNext(
       quality: quality,
       repetitions: card.repetitions,
       easeFactor: card.easeFactor,
       intervalDays: card.intervalDays,
+      baseEase: p['baseEase']!,
+      easyBonus: p['easyBonus']!,
+      lapseInterval: p['lapseInterval']!,
+      graduatingInterval: p['graduatingInterval']!,
+      easyInterval: p['easyInterval']!,
     );
 
     await _db.upsertSm2Progress({
@@ -261,16 +329,35 @@ class SM2Service {
 
   // ─── STATS ─────────────────────────────────────────────────────────────────
 
-  Future<Map<String, int>> getDailyStats() async {
+  Future<Map<String, int>> getDailyStats(List<VocabCard> allCards) async {
     final today = _today();
     final log = await _db.getSm2DailyLog(today);
-    final newLimit = await _db.getSm2NewLimit();
-    final reviewLimit = await _db.getSm2ReviewLimit();
+    
+    int trueNew = 0;
+    int trueDue = 0;
+
+    for (final vocabCard in allCards) {
+      for (final type in SM2CardType.values) {
+        final progress = await _db.getSm2ProgressTyped(vocabCard.cardId, type.value);
+        if (progress == null) {
+          trueNew++;
+        } else {
+          final nextReview = progress['next_review'] as String?;
+          if (nextReview == null || nextReview.compareTo(today) <= 0) {
+            trueDue++;
+          }
+        }
+      }
+    }
+
+    final newStudied = log['new_studied'] ?? 0;
+    final reviewStudied = log['review_studied'] ?? 0;
+
     return {
-      'new_studied': log['new_studied'] ?? 0,
-      'review_studied': log['review_studied'] ?? 0,
-      'new_limit': newLimit,
-      'review_limit': reviewLimit,
+      'new_studied': newStudied,
+      'review_studied': reviewStudied,
+      'new_limit': trueNew + newStudied,
+      'review_limit': trueDue + reviewStudied,
     };
   }
 
